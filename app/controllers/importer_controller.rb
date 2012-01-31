@@ -2,6 +2,7 @@
 require 'fastercsv'
 require 'tempfile'
 require 'nkf'
+require 'zipruby'
 
 class ImporterController < ApplicationController
   unloadable
@@ -32,13 +33,21 @@ class ImporterController < ApplicationController
     # save import file
     @original_filename = file.original_filename
     tmpfile = Tempfile.new("redmine_importer")
+
     if tmpfile
-      tmpfile.write(convert_file(file, encoding))
-      tmpfile.close
-      tmpfilename = File.basename(tmpfile.path)
       if !$tmpfiles
         $tmpfiles = Hash.new
       end
+
+      if File.extname(@original_filename) == '.zip'
+        tmpdir = extract_zip_to_tmpdir(file.path)
+        session[:importer_tmpdir] = tmpdir
+        file = File.new(get_issue_csv_path(tmpdir))
+      end
+
+      tmpfile.write(convert_file(file, encoding))
+      tmpfile.close
+      tmpfilename = File.basename(tmpfile.path)
       $tmpfiles[tmpfilename] = tmpfile
     else
       flash[:error] = "Cannot save import file."
@@ -280,5 +289,29 @@ private
     nkf_option ? NKF.nkf('-m0 -x ' + nkf_option, file.read) : file.read 
   end
 
+  def extract_zip_to_tmpdir(zipfile_path)
+    tmpdir = Dir.mktmpdir
+    Zip::Archive.open(zipfile_path) do |ar|
+      ar.each do |zf|
+        if zf.directory?
+          FileUtils.mkdir_p(File.join(tmpdir, zf.name))
+        else
+          dirname = File.dirname(zf.name)
+          FileUtils.mkdir_p(File.join(tmpdir, dirname)) unless File.exist?(File.join(tmpdir, dirname))
+
+          open(File.join(tmpdir, zf.name), 'wb') do |f|
+            f << zf.read
+          end
+        end
+      end
+    end
+    tmpdir
+  end
+
+  def get_issue_csv_path(tmpdir)
+    Dir.glob("#{tmpdir}/*.csv").first
+  end
 
 end
+
+
