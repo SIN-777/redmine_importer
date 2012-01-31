@@ -41,8 +41,8 @@ class ImporterController < ApplicationController
 
       if File.extname(@original_filename) == '.zip'
         tmpdir = extract_zip_to_tmpdir(file.path)
-        session[:importer_tmpdir] = tmpdir
         file = File.new(get_issue_csv_path(tmpdir))
+        session[:importer_tmpdir] = tmpdir
       end
 
       tmpfile.write(convert_file(file, encoding))
@@ -98,6 +98,7 @@ class ImporterController < ApplicationController
   end
 
   def result
+    tmpdir = session[:importer_tmpdir]
     tmpfilename = session[:importer_tmpfile]
     splitter = session[:importer_splitter]
     wrapper = session[:importer_wrapper]
@@ -250,6 +251,19 @@ class ImporterController < ApplicationController
         # 记录错误
         @failed_count += 1
         @failed_issues[@handle_count + 1] = row
+      else
+        if tmpdir
+          attached_filename = issue.description.slice(/\!(.*?)\!/, 1) rescue nil
+          if attached_filename && File.exist?(attached_path = File.join(tmpdir, 'images', attached_filename))
+            f = File.new(attached_path)
+            File.__send__(:define_method, :size){ File.size(f) }
+            f.extend(ActionController::UploadedFile)
+            f.original_path = attached_path
+            f.content_type = (File.extname(attached_filename) == '.jpg' ? 'image/jpeg' : "image/#{File.extname(attached_filename)[1..-1]}")
+            atts = {:dummy_key => {'file' => f}}
+            res = Attachment.attach_files(issue, atts)
+          end
+        end
       end
   
       if journal
